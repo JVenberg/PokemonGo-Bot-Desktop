@@ -1,39 +1,23 @@
 const electron = require('electron');
+const dialog = require('electron').dialog;
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
 const ipcMain = electron.ipcMain;
 const Menu = electron.Menu;
 const path = require('path');
 const os = require('os');
-const fs = require('fs')
+const fs = require('fs');
 const autoUpdater = electron.autoUpdater;
-//electron.crashReporter.start();
 
 var platform = os.platform() + '_' + os.arch();
-var version = app.getVersion();
+app.setVersion(require('./package.json').version);
 
 var mainWindow = null;
 var procStarted = false;
 var subpy = null;
-var server = null;
 var mainAddr;
-var restarting = false;
 
-//try {
-//  autoUpdater.setFeedURL('https:///update/'+platform+'/'+version);
-//} catch (e) {console.log(e)}
-
-//autoUpdater.on('update-downloaded', function(){
-//  mainWindow.webContents.send('update-ready');
-//});
-
-//try {
-//  autoUpdater.checkForUpdates();
-//} catch (e) {}
-
-// Setup menu bar
-
-
+// Menu Template
 var template = [{
     label: "Application",
     submenu: [{
@@ -100,44 +84,60 @@ var template = [{
 }
 ];
 
+// Launch app
+app.on('ready', function() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  setupMainWindow();
+});
 
+// Handle app closing
 app.on('window-all-closed', function() {
-  if (restarting) {
-    return;
-  }
   if (subpy && subpy.pid) {
+    // Kill python bot
     killProcess(subpy.pid);
-  }
-  if (server && server.pid) {
-    killProcess(server.pid);
   }
   app.quit();
 });
 
-app.on('ready', function() {
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-
-  setupMainWindow();
+// ipc listeners
+// Handle logout
+ipcMain.on('logout', function(event, auth, code, location, opts) {
+  if (procStarted) {
+    logData('Killing Python process...');
+    if (subpy && subpy.pid) {
+      killProcess(subpy.pid);
+    }
+  }
+  procStarted = false;
 });
 
-function setupMainWindow() {
-  restarting = false;
+// Start python bot
+ipcMain.on('startPython', function(event, auth, code, location, opts) {
+  if (!procStarted) {
+    logData('Starting Python process...');
+    startPython(auth, code, location, opts);
+  }
+  procStarted = true;
+});
 
-  mainWindow = new BrowserWindow({width: 2000, height: 1000, minWidth: 700, minHeight: 500});
-  mainWindow.loadURL('file://' + __dirname + '/login.html');
+// Creates main window and load Login page
+function setupMainWindow() {
+
+  if(!mainWindow)
+  {
+    mainWindow = new BrowserWindow({width: 1280, height: 720, minWidth: 700, minHeight: 500});
+  }
+  mainWindow.loadURL('file://' + __dirname + '/app/login.html');
 
   mainWindow.on('closed', function() {
     mainWindow = null;
     if (subpy && subpy.pid) {
       killProcess(subpy.pid);
     }
-    if (server && server.pid) {
-      killProcess(server.pid);
-    }
   });
 }
 
+// Sends log to web page
 function logData(str){
   console.log(str);
   if (mainWindow){
@@ -156,229 +156,116 @@ function killProcess(pid) {
   }
 }
 
-ipcMain.on('logout', function(event, auth, code, location, opts) {
-  restarting = true;
-  if (procStarted) {
-    logData('Killing Python process...');
-    if (subpy && subpy.pid) {
-      killProcess(subpy.pid);
-    }
-    if (server && server.pid) {
-      killProcess(server.pid);
-    }
-  }
-  procStarted = false;
-  mainWindow.close();
-  setupMainWindow();
-});
 
-ipcMain.on('startPython', function(event, auth, code, location, opts) {
-  if (!procStarted) {
-    logData('Starting Python process...');
-    startPython(auth, code, location, opts);
-  }
-  procStarted = true;
-});
-
-ipcMain.on('getServer', function(event) {
-  event.sender.send('server-up', mainAddr);
-});
-
-ipcMain.on('installUpdate', function(event) {
-  autoUpdater.quitAndInstall();
-});
+// Starts python bot
 function startPython(auth, code, location, opts) {
 
-  mainWindow.loadURL('file://' + __dirname + '/main.html');
-  // mainWindow.openDevTools();
-    
+  // Load Index page
+  mainWindow.loadURL('file://' + __dirname + '/app/index.html');
 
-  // Find open port
-  var portfinder = require('portfinder');
-  portfinder.getPort(function (err, port) {
+  var cmdLine = [
+    './pokecli.py',
+  ];
 
-    logData('Got open port: ' + port);
+  logData('Bot path: ' + path.join(__dirname, 'gofbot'));
+  logData('python ' + cmdLine.join(' '));
 
-    // Run python web server
-    var cmdLine = [
-      './pokecli.py',
-    ];
+  var pythonCmd = 'python';
+  if (os.platform() == 'win32') {
+    pythonCmd = path.join(__dirname, 'pywin', 'python.exe');
+  }
 
-    if (false) {
-      cmdLine.push('--username');
-      cmdLine.push(opts.username);
-      cmdLine.push('--password');
-      cmdLine.push(opts.password);
-    }
+  // Rename config.json if needed
+  try {
+    //test to see if settings exist
+    var setting_path = path.join(__dirname, 'gofbot/configs/config.json');
+    fs.openSync(setting_path, 'r+');
+  } catch (err) {
+    fs.renameSync(path.join(__dirname, 'gofbot/configs/config.json.example'),setting_path);
+  }
 
-    // logData(opts.username);
-
-
-    // console.log(cmdLine);
-    logData('Bot path: ' + path.join(__dirname, 'gofbot'));
-    logData('python ' + cmdLine.join(' '));
-
-    var pythonCmd = 'python';
-    if (os.platform() == 'win32') {
-      pythonCmd = path.join(__dirname, 'pywin', 'python.exe');
-    }
-
-    var serverCmdLine = [
-      'serveit.py',
-      port
-    ];
-
-    logData('Bot path: ' + path.join(__dirname, 'gofbot/web'));
-    logData('python ' + serverCmdLine.join(' '));
-    
-    var renameFiles = function(){
-      //rename config
-      try {
-        //test to see if settings exist
-        var setting_path = path.join(__dirname, 'gofbot/config.json');
-        fs.openSync(setting_path, 'r+');
-      } catch (err) {
-        fs.renameSync(path.join(__dirname, 'gofbot/config.json.example'),setting_path);
-      }
-
-      //rename release_config
-      try {
-        //test to see if settings exist
-        var release_path = path.join(__dirname, 'gofbot/release_config.json');
-        fs.openSync(release_path, 'r+');
-      } catch (err) {
-        fs.renameSync(path.join(__dirname, 'gofbot/release_config.json.example'),release_path);
-      }
-
-      //rename user file
-      try {
-        //test to see if settings exist
-        var user_path = path.join(__dirname, 'gofbot/web/userdata.js');
-        fs.openSync(user_path, 'r+');
-      } catch (err) {
-        fs.renameSync(path.join(__dirname, 'gofbot/web/userdata.js.example'),user_path);
-      }
-    };
-
-    renameFiles()
-
-    
-    var data=fs.readFileSync(path.join(__dirname, 'gofbot/config.json'));
-
-    var settings = JSON.parse(data);
-    
-
-    settings.auth_service = auth
-    if (auth == 'google') {
-      settings.password = opts.google_password;
-      settings.username = opts.google_username;
-    } else {
-      settings.password = opts.ptc_password;
-      settings.username = opts.ptc_username;
-    }
-
-    settings.gmapkey = opts.google_maps_api;
-    settings.max_steps = parseInt(opts.max_steps);
+  // Rename userdata.js if needed
+  try {
+    //test to see if settings exist
+    var user_path = path.join(__dirname, 'gofbot/web/config/userdata.js');
+    fs.openSync(user_path, 'r+');
+  } catch (err) {
+    fs.renameSync(path.join(__dirname, 'gofbot/web/config/userdata.js.example'),user_path);
+  }
+  
+  // Load user config
+  var data = fs.readFileSync(path.join(__dirname, 'gofbot/configs/config.json'));
+  var settings = JSON.parse(data);
+  
+  // Load settings
+  settings.auth_service = auth
+  if (auth == 'google') {
+    settings.password = opts.google_password;
+    settings.username = opts.google_username;
+  } else {
+    settings.password = opts.ptc_password;
+    settings.username = opts.ptc_username;
+  }
+  settings.gmapkey = opts.google_maps_api;
+  if (opts.walk_speed != '') {
     settings.walk = parseInt(opts.walk_speed);
-    settings.mode = opts.mode;
+  }
+  settings.location = location;
 
 
-    var userdata_code = ['var users = ["' + settings.username + '"];',
-                            'var userZoom = true;',
-                            'var userFollow = true;',
-                            'var imageExt = ".png";',
-                            'var gMapsAPIKey = "' + settings.gmapkey + '";',
-    ]
-                            
-                            
-    fs.writeFileSync(path.join(__dirname, 'gofbot/web/userdata.js'), userdata_code.join('\n'), 'utf-8');
+  var userdata_code = ['var users = ["' + settings.username + '"];',
+                          'var userZoom = true;',
+                          'var userFollow = true;',
+                          'var imageExt = ".png";',
+                          'var gMapsAPIKey = "' + settings.gmapkey + '";',
+  ]
+                          
+  // Write userdata for map                
+  fs.writeFileSync(path.join(__dirname, 'gofbot/web/config/userdata.js'), userdata_code.join('\n'), 'utf-8');
 
-    //temporary fix for location/catchable bug in PokemonGo-Bot
-    try {
-        //test to see if settings exist
-        var location_path = path.join(__dirname, 'gofbot/web/location-' + settings.username + '.json');
-        fs.openSync(location_path, 'r+');
-      } catch (err) {
-        fs.writeFileSync(location_path,"{}");
-    }
-    try {
-        //test to see if settings exist
-        var location_path = path.join(__dirname, 'gofbot/web/catchable-' + settings.username + '.json');
-        fs.openSync(location_path, 'r+');
-      } catch (err) {
-        fs.writeFileSync(location_path,"{}");
-    }
+  //temporary fix for location/catchable bug in PokemonGo-Bot
+  try {
+      //test to see if settings exist
+      var location_path = path.join(__dirname, 'gofbot/web/location-' + settings.username + '.json');
+      fs.openSync(location_path, 'r+');
+    } catch (err) {
+      fs.writeFileSync(location_path,"{}");
+  }
+  try {
+      //test to see if settings exist
+      var location_path = path.join(__dirname, 'gofbot/web/catchable-' + settings.username + '.json');
+      fs.openSync(location_path, 'r+');
+    } catch (err) {
+      fs.writeFileSync(location_path,"{}");
+  }
 
-    settings.location = location;
+  // Save user config
+  fs.writeFileSync(path.join(__dirname, 'gofbot/configs/config.json'), JSON.stringify(settings, null, 4) , 'utf-8');
 
-    fs.writeFileSync(path.join(__dirname, 'gofbot/config.json'), JSON.stringify(settings) , 'utf-8');
-
-
-
-    server = require('child_process').spawn(pythonCmd, serverCmdLine, {
-      cwd: path.join(__dirname, ''),
-      detached: true
-    });
-
-    server.stdout.on('data', (data) => {
-      console.log(`Python: ${data}`);
-      mainWindow.webContents.send('pythonLog', {'msg': `${data}`});
-    });
-    server.stderr.on('data', (data) => {
-      console.log(`Python: ${data}`);
-      mainWindow.webContents.send('pythonLog', {'msg': `${data}`});
-    });
-
-
-    subpy = require('child_process').spawn(pythonCmd, cmdLine, {
-      cwd: path.join(__dirname, 'gofbot'),
-      detached: true
-    });
-
-    subpy.stdout.on('data', (data) => {
-      console.log(`Python: ${data}`);
-      mainWindow.webContents.send('pythonLog', {'msg': `${data}`});
-    });
-    subpy.stderr.on('data', (data) => {
-      console.log(`Python: ${data}`);
-      mainWindow.webContents.send('pythonLog', {'msg': `${data}`});
-    });
-
-    
-
-    var rq = require('request-promise');
-    mainAddr = 'http://localhost:' + port + "/web";
-
-    var openWindow = function(){
-      mainWindow.webContents.send('server-up', mainAddr);
-      mainWindow.webContents.executeJavaScript(
-        'serverUp("'+mainAddr+'")');
-      mainWindow.on('closed', function() {
-        mainWindow = null;
-        if (subpy && subpy.pid) {
-          killProcess(subpy.pid);
-        }
-        if (server && server.pid) {
-          killProcess(server.pid);
-        }
-        procStarted = false;
-      });
-    };
-
-    var startUp = function(){
-      rq(mainAddr)
-        .then(function(htmlString){
-          logData('server started!');
-          openWindow();
-        })
-        .catch(function(err){
-          //console.log('waiting for the server start...');
-          startUp();
-        });
-    };
-
-    startUp();
-
+  // Create python bot process
+  subpy = require('child_process').spawn(pythonCmd, cmdLine, {
+    cwd: path.join(__dirname, 'gofbot'),
+    detached: true
   });
 
+  // Send bot log to web page
+  subpy.stdout.on('data', (data) => {
+    console.log(`Python: ${data}`);
+    mainWindow.send('pythonLog', {'msg': `${data}`});
+  });
+  subpy.stderr.on('data', (data) => {
+    console.log(`Python: ${data}`);
+    mainWindow.send('pythonLog', {'msg': `${data}`});
+    if(data.indexOf("ERROR")>-1)
+    {
+      dialog.showMessageBox({type:"error",title:"Whoops",message:"Error in python bot",detail:""+data,buttons:["Yes I read carefully error message"]});
+    }
+  });
+
+  subpy.on('exit', () => {
+    console.log(`Bot exited`);
+    procStarted = false;
+    setupMainWindow();
+  });
+  
 };

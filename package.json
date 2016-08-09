@@ -7,22 +7,26 @@
   "version": "0.0.1-alpha",
   "main": "main.js",
   "scripts": {
-    "postinstall": "cd ./gofbot/ && sudo pip install -r requirements.txt",
+    "postinstall": "cd ./gofbot/ && pip install -r requirements.txt",
     "start": "electron main.js"
   },
   "dependencies": {
-    "request": "*",
-    "request-promise": "*",
-    "electron-prebuilt": "*",
-    "portfinder": "*",
     "async": "^0.9.0",
+    "cross-spawn": "*",
+    "electron-compile": "^3.3.5",
+    "electron-prebuilt": "*",
+    "fs-extra": "^0.30.0",
     "lock": "^0.1.2",
     "node-uuid": "^1.4.3",
-    "xtend": "^4.0.1",
-    "cross-spawn": "*",
-    "localtunnel": "*"
+    "portfinder": "*",
+    "remote": "^0.2.6",
+    "request": "*",
+    "request-promise": "*",
+    "xtend": "^4.0.1"
   },
   "devDependencies": {
-    "electron-packager": "*"
+    "bower": "^1.7.9",
+    "electron-packager": "*",
+    "gulp": "^3.9.1"
   }
 }
